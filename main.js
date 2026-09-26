@@ -8,7 +8,7 @@ app.whenReady().then(() => {
     height: 780,
     useContentSize: true,
     autoHideMenuBar: true,
-    title: '向日葵保卫战',
+    title: '向日葵保卫战！',
     webPreferences: { contextIsolation: true }
   });
   win.loadFile(path.join(__dirname, 'index.html'));
