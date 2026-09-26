@@ -1,0 +1,14 @@
+{
+  "name": "sunflower-defense",
+  "version": "1.0.0",
+  "description": "向日葵保卫战——纯原生 Canvas 塔防游戏",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-packager . 向日葵保卫战 --platform=win32 --arch=x64 --out=dist --overwrite --asar"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-packager": "^17.1.2"
+  }
+}
