@@ -18,8 +18,8 @@
         times: [14, 34, 58], gap: 0.8,
         waves: Object.freeze([
           Object.freeze({ flag: 1, wilt: 14, pot: 7, runner: 4 }),
-          Object.freeze({ flag: 1, wilt: 14, pot: 10, runner: 7, bucket: 5 }),
-          Object.freeze({ flag: 1, wilt: 16, pot: 10, runner: 8, bucket: 6, bruiser: 3, giant: 2 })
+          Object.freeze({ flag: 1, wilt: 14, pot: 10, runner: 7, bucket: 5, balloon: 2 }),
+          Object.freeze({ flag: 1, wilt: 16, pot: 10, runner: 8, bucket: 6, bruiser: 3, giant: 2, balloon: 3 })
         ])
       }),
       Object.freeze({
@@ -27,8 +27,8 @@
         times: [13, 31, 54], gap: 0.6,
         waves: Object.freeze([
           Object.freeze({ flag: 1, wilt: 15, pot: 8, runner: 5, bucket: 3 }),
-          Object.freeze({ flag: 1, wilt: 14, pot: 11, runner: 8, bucket: 6, bruiser: 4, giant: 2 }),
-          Object.freeze({ flag: 1, wilt: 15, pot: 13, runner: 9, bucket: 8, bruiser: 6, giant: 4 })
+          Object.freeze({ flag: 1, wilt: 14, pot: 11, runner: 8, bucket: 6, bruiser: 4, giant: 2, balloon: 3 }),
+          Object.freeze({ flag: 1, wilt: 15, pot: 13, runner: 9, bucket: 8, bruiser: 6, giant: 4, balloon: 4 })
         ])
       })
     ]),
@@ -44,6 +44,7 @@
         Object.freeze({ type: 'pot', base: 2, perWave: 1.5, cap: 30, fromWave: 2 }),
         Object.freeze({ type: 'bucket', base: 1, perWave: 1, cap: 30, fromWave: 3 }),
         Object.freeze({ type: 'bruiser', base: 1, perWave: 1, cap: 30, fromWave: 4 }),
+        Object.freeze({ type: 'balloon', base: 1, perWave: 1, cap: 30, fromWave: 5 }),
         Object.freeze({ type: 'giant', base: 0, perWave: 0.8, cap: 30, fromWave: 6 })
       ])
     })

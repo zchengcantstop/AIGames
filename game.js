@@ -18,12 +18,13 @@
     runner: { name: '疾跑小葵尸', hp: 100, speed: 28, damage: 20 },
     bucket: { name: '瓜子桶', hp: 500, speed: 11, damage: 30 },
     bruiser: { name: '大块头葵尸', hp: 700, speed: 9.5, damage: 42 },
-    giant: { name: '超级巨大葵尸', hp: 1600, speed: 7, damage: 90 }
+    giant: { name: '超级巨大葵尸', hp: 1600, speed: 7, damage: 90 },
+    balloon: { name: '气球葵尸', hp: 300, speed: 13, damage: 0, flying: true }
   });
   const LEVELS = Object.freeze(WAVE_CONFIG.levels.concat([WAVE_CONFIG.endless]));
   const center = (row, col) => ({ x: BOARD.x + (col + 0.5) * BOARD.w, y: BOARD.y + (row + 0.5) * BOARD.h });
   class Game {
-    constructor(random = Math.random) { this.random = random; this.reset(0); this.state = 'menu'; }
+    constructor(random = Math.random) { this.random = random; this.cheat = false; this.difficulty = 1; this.reset(0); this.state = 'menu'; }
     reset(level = 0) {
       this.level = Math.max(0, Math.min(LEVELS.length - 1, Math.floor(Number(level) || 0)));
       this.endless = !!LEVELS[this.level].endless;
@@ -75,31 +76,35 @@
       const spec = PLANTS[index];
       if (!spec || !Number.isInteger(row) || !Number.isInteger(col) || row < 0 || row >= 5 || col < 0 || col >= 9) return '请种在草坪格子里';
       if (this.plants.some(p => p.row === row && p.col === col)) return '这里已经有一株向日葵了';
-      if (this.cooldowns[index] > 0) return '种子还在准备中，请稍等';
-      if (this.sun < spec.cost) return '阳光不够，点击太阳收集阳光';
-      this.sun -= spec.cost; this.cooldowns[index] = spec.cooldown;
-      const p = { ...center(row, col), id: this.nextId++, kind: spec.id, kinds: [spec.id], row, col, level: 1, hp: spec.hp, maxHp: spec.hp, timer: spec.id === 'bomb' ? 1.1 : 0.5, sunTimer: 7, age: 0, hit: 0, burst: 0 };
+      if (!this.cheat) { // 无敌模式：不扣阳光、不进冷却
+        if (this.cooldowns[index] > 0) return '种子还在准备中，请稍等';
+        if (this.sun < spec.cost) return '阳光不够，点击太阳收集阳光';
+        this.sun -= spec.cost;
+      }
+      this.cooldowns[index] = this.cheat ? 0 : spec.cooldown;
+      const p = { ...center(row, col), id: this.nextId++, kind: spec.id, kinds: [spec.id], row, col, level: 1, hp: spec.hp, maxHp: spec.hp, timer: spec.id === 'bomb' ? 1.1 : 0.5, sunTimer: 7, age: 0, hit: 0, burst: 0, burstT: 0 };
       this.plants.push(p); this.emit('plant', { x: p.x, y: p.y }); return null;
     }
-    // Build the level-2 plant that results from fusing two level-1 plants:
-    // same kind upgrades it, different kinds combine both abilities into a hybrid.
-    evolve(kinds, row, col) {
+    // Build the fused plant that results from combining two plants:
+    // 1级+1级 → 2级（同种进化 / 异种混血），2级+1级 → 3级。
+    // HP adds up: the fused plant carries the combined HP of everything that went into it.
+    evolve(kinds, row, col, level = 2, hp = null) {
       const unique = [...new Set(kinds)];
-      // HP adds up per contributing plant: same-kind pairs double, hybrids add both kinds.
-      const hp = kinds.reduce((sum, k) => sum + PLANTS.find(s => s.id === k).hp, 0);
-      const p = { ...center(row, col), id: this.nextId++, kind: unique[0], kinds: unique, row, col, level: 2, hp, maxHp: hp, timer: unique.includes('bomb') ? 1.1 : 0.5, sunTimer: unique.length === 1 ? 6 : 12, age: 0, hit: 0, burst: 0 };
+      const total = hp != null ? hp : kinds.reduce((sum, k) => sum + PLANTS.find(s => s.id === k).hp, 0);
+      const p = { ...center(row, col), id: this.nextId++, kind: unique[0], kinds: unique, row, col, level, hp: total, maxHp: total, timer: unique.includes('bomb') ? 1.1 : 0.5, sunTimer: unique.length === 1 ? 6 : 12, age: 0, hit: 0, burst: 0, burstT: 0 };
       this.plants.push(p);
       this.effects.push({ type: 'blast', x: p.x, y: p.y - 16, life: 0.7, maxLife: 0.7 });
       this.emit('fuse');
       return p;
     }
-    // Drag one plant onto another (any kind) to fuse them into a level-2 hybrid.
+    // Drag one plant onto another to fuse: 1+1 → 2级，2+1 → 3级；两株 2 级不能合体。
     fuse(source, row, col) {
       if (this.state !== 'playing' || !this.plants.includes(source)) return false;
       const dest = this.plants.find(p => p.row === row && p.col === col);
-      if (!dest || dest === source || dest.level !== 1 || source.level !== 1) return false;
+      if (!dest || dest === source || source.level >= 3 || dest.level >= 3 || source.level + dest.level > 3) return false;
+      const level = Math.max(source.level, dest.level) + 1;
       this.plants = this.plants.filter(p => p !== source && p !== dest);
-      this.evolve([...source.kinds, ...dest.kinds], row, col);
+      this.evolve([...source.kinds, ...dest.kinds], row, col, level, source.maxHp + dest.maxHp);
       return true;
     }
     // Drag a card straight onto a planted flower to fuse without pre-planting a twin.
@@ -107,12 +112,15 @@
       if (this.state !== 'playing') return '请先开始或继续游戏';
       const spec = PLANTS[index];
       const dest = this.plants.find(p => p.row === row && p.col === col);
-      if (!dest || dest.level !== 1) return '只能拖到 1 级植物上合体';
-      if (this.cooldowns[index] > 0) return '种子还在准备中，请稍等';
-      if (this.sun < spec.cost) return '阳光不够，点击太阳收集阳光';
-      this.sun -= spec.cost; this.cooldowns[index] = spec.cooldown;
+      if (!dest || dest.level >= 3) return '只能拖到 3 级以下的植物上合体';
+      if (!this.cheat) { // 无敌模式：不扣阳光、不进冷却
+        if (this.cooldowns[index] > 0) return '种子还在准备中，请稍等';
+        if (this.sun < spec.cost) return '阳光不够，点击太阳收集阳光';
+        this.sun -= spec.cost;
+      }
+      this.cooldowns[index] = this.cheat ? 0 : spec.cooldown;
       this.plants = this.plants.filter(p => p !== dest);
-      this.evolve([spec.id, ...dest.kinds], row, col);
+      this.evolve([spec.id, ...dest.kinds], row, col, dest.level + 1, dest.maxHp + spec.hp);
       return null;
     }
     shovel(row, col) {
@@ -156,8 +164,8 @@
     spawn(type, row, x = 1064) {
       const spec = ENEMIES[type];
       if (!spec || row < 0 || row > 4) return;
-      // Later levels and deeper endless waves field tougher zombies.
-      const boost = this.endless ? 1 + this.wave * 0.07 : 1 + this.level * 0.12;
+      // Later levels and deeper endless waves field tougher zombies; the difficulty slider scales HP further.
+      const boost = (this.endless ? 1 + this.wave * 0.07 : 1 + this.level * 0.12) * (this.difficulty || 1);
       const hp = Math.round(spec.hp * boost);
       const e = { ...spec, type, row, x, y: center(row, 0).y, id: this.nextId++, hp, maxHp: hp, slow: 0, hit: 0, biting: false, age: 0 };
       this.enemies.push(e); return e;
@@ -180,11 +188,11 @@
     }
     // Lob a watermelon on a parabola; it splashes everything near where it lands.
     lob(p, target) {
-      const boosted = p.level === 2 && p.kinds.length === 1;
+      const power = p.level >= 3 ? 3 : (p.level === 2 && p.kinds.length === 1 ? 2 : 1);
       this.shots.push({
         lob: true, sx: p.x + 20, sy: p.y - 34, tx: target.x, ty: target.y, t: 0,
         dur: Math.max(0.45, Math.min(1.1, Math.abs(target.x - p.x) / 420)),
-        damage: boosted ? 90 : 55, splash: boosted ? 120 : 85
+        damage: power === 3 ? 130 : power === 2 ? 90 : 55, splash: power === 3 ? 150 : power === 2 ? 120 : 85
       });
       this.emit('shoot');
     }
@@ -203,26 +211,27 @@
       }
       for (const p of this.plants) {
         if (p.hp <= 0) continue;
-        const boosted = p.level === 2 && p.kinds.length === 1; // only same-kind fusions get the level-2 numbers; hybrids and plain level-1 plants use base abilities
+        // 强化档位：1=基础，2=纯种 2 级，3=3 级（纯种与混血同享）。
+        const power = p.level >= 3 ? 3 : (p.level === 2 && p.kinds.length === 1 ? 2 : 1);
         p.age += dt; p.hit = Math.max(0, p.hit - dt); p.timer -= dt;
         // Every ability the plant carries (hybrids have several) runs independently.
         if (p.kinds.includes('sun')) {
           p.sunTimer -= dt;
-          if (p.sunTimer <= 0) { this.addSun(p.x + 18, p.y + 4, false, boosted ? 50 : 25); p.sunTimer = boosted ? 6 : 12; }
+          if (p.sunTimer <= 0) { this.addSun(p.x + 18, p.y + 4, false, power === 3 ? 75 : power === 2 ? 50 : 25); p.sunTimer = power === 3 ? 4.5 : power === 2 ? 6 : 12; }
         }
         if ((p.kinds.includes('seed') || p.kinds.includes('ice')) && p.timer <= 0) {
-          if (this.enemies.some(e => e.hp > 0 && e.row === p.row && e.x > p.x - 12 && e.x < 1090)) {
-            this.fire(p); p.timer = boosted ? (p.kinds.includes('ice') ? 1.3 : 1.0) : (p.kinds.includes('ice') ? 1.7 : 1.35);
-            if (boosted) p.burst = 0.13; // pure level-2 shooters fire a second seed right after
+          if (this.enemies.some(e => e.hp > 0 && !e.flying && e.row === p.row && e.x > p.x - 12 && e.x < 1090)) {
+            this.fire(p); p.timer = power === 3 ? (p.kinds.includes('ice') ? 1.0 : 0.75) : power === 2 ? (p.kinds.includes('ice') ? 1.3 : 1.0) : (p.kinds.includes('ice') ? 1.7 : 1.35);
+            if (power > 1) { p.burst = power - 1; p.burstT = 0.13; } // 升级射手紧接着再补发瓜子
           } else p.timer = 0;
         }
-        if (p.burst > 0) { p.burst -= dt; if (p.burst <= 0) this.fire(p); }
+        if (p.burst > 0) { p.burstT -= dt; if (p.burstT <= 0) { this.fire(p); p.burst--; p.burstT += 0.13; } }
         if (p.kinds.includes('melon') && p.timer <= 0) {
           const target = this.enemies.filter(e => e.hp > 0 && e.row === p.row && e.x > p.x - 12 && e.x < 1090).sort((a, b) => a.x - b.x)[0];
-          if (target) { this.lob(p, target); p.timer = boosted ? 1.8 : 2.6; } else p.timer = 0;
+          if (target) { this.lob(p, target); p.timer = power === 3 ? 1.4 : power === 2 ? 1.8 : 2.6; } else p.timer = 0;
         }
         if (p.kinds.includes('bomb') && p.timer <= 0) {
-          for (const e of this.enemies) if (Math.abs(e.row - p.row) <= 1 && Math.abs(e.x - p.x) < (boosted ? 260 : 165)) this.hurt(e, boosted ? 1200 : 700);
+          for (const e of this.enemies) if (!e.flying && Math.abs(e.row - p.row) <= 1 && Math.abs(e.x - p.x) < (power === 3 ? 340 : power === 2 ? 260 : 165)) this.hurt(e, power === 3 ? 2000 : power === 2 ? 1200 : 700);
           this.effects.push({ type: 'blast', x: p.x, y: p.y - 16, life: 0.7, maxLife: 0.7, color: '#ffd34f' });
           p.hp = 0; this.emit('bomb');
         }
@@ -238,16 +247,17 @@
           continue;
         }
         const previous = s.x; s.x += 370 * dt;
-        const target = this.enemies.filter(e => e.hp > 0 && e.row === s.row && e.x + 24 >= previous && e.x - 24 <= s.x).sort((a, b) => a.x - b.x)[0];
+        const target = this.enemies.filter(e => e.hp > 0 && !e.flying && e.row === s.row && e.x + 24 >= previous && e.x - 24 <= s.x).sort((a, b) => a.x - b.x)[0];
         if (target) { this.hurt(target, s.damage, s.ice); s.dead = true; }
       }
       this.shots = this.shots.filter(s => !s.dead && (s.lob || s.x < 1120));
       for (const e of this.enemies) {
         if (e.hp <= 0) continue;
         e.age += dt; e.hit = Math.max(0, e.hit - dt); e.slow = Math.max(0, e.slow - dt);
-        const victim = this.plants.filter(p => p.hp > 0 && p.row === e.row && e.x <= p.x + 40 && e.x >= p.x - 30).sort((a, b) => b.x - a.x)[0];
+        // 气球葵尸从植物头顶飘过：不啃咬，只有西瓜砸得到；小推车是最后防线。
+        const victim = e.flying ? null : this.plants.filter(p => p.hp > 0 && p.row === e.row && e.x <= p.x + 40 && e.x >= p.x - 30).sort((a, b) => b.x - a.x)[0];
         e.biting = !!victim;
-        if (victim) { victim.hp -= e.damage * dt * (e.slow > 0 ? 0.7 : 1); victim.hit = 0.08; }
+        if (victim) { victim.hit = 0.08; if (!this.cheat) victim.hp -= e.damage * dt * (e.slow > 0 ? 0.7 : 1); } // 无敌模式下植物不掉血
         else e.x -= e.speed * dt * (e.slow > 0 ? 0.48 : 1);
         const mower = this.mowers[e.row];
         if (e.x < 113 && mower.state === 'ready') { mower.state = 'active'; this.emit('mower', { row: e.row }); }

@@ -24,7 +24,7 @@ ok(LEVELS[3].endless === true, '第 4 关是无尽模式');
   ok(g.schedule.length === 77, `第 1 关共 77 只敌人（实际 ${g.schedule.length}）`);
   ok(g.schedule.every(s => s.row >= 0 && s.row <= 4), '所有敌人出现在 0–4 行');
   g.reset(2);
-  ok(g.schedule.length === 134, `第 3 关共 134 只敌人（实际 ${g.schedule.length}）`);
+  ok(g.schedule.length === 141, `第 3 关共 141 只敌人（实际 ${g.schedule.length}）`);
   ok(g.schedule.some(s => s.type === 'giant'), '第 3 关出现超级巨大葵尸');
   ok(g.schedule.every(s => s.time >= 0), '出场时间不早于 0 秒');
 }
@@ -61,6 +61,7 @@ section('种植规则');
   ok(g.plant(0, 2, 3) === null, '正常种植成功');
   ok(g.sun === 450, '种植扣除阳光（500→450）');
   ok(g.plant(0, 2, 3) !== null, '同一格不能重复种植');
+  g.cooldowns.fill(0);
   ok(g.plant(0, 0, 8) === null, '可在第 9 列种植');
   ok(g.plant(0, 2, 9) !== null, '第 10 列越界被拒绝');
   ok(g.plant(0, 5, 3) !== null, '第 6 行越界被拒绝');
@@ -85,8 +86,8 @@ section('阳光收集');
   ok(g.collect(400, 300) === true, '点击太阳可收集');
   ok(g.sun === before + 25, '收集获得 25 阳光');
   ok(g.collect(400, 300) === false, '太阳消失后不能重复收集');
-  g.addSun(500, 320, false);
-  ok(g.collect(560, 330) === true, '点击太阳附近也能收集（判定半径）');
+  g.addSun(500, 320, false); // 太阳生成点在 (500, 290)
+  ok(g.collect(510, 305) === true, '点击太阳附近也能收集（判定半径）');
   g.suns.length = 0; g.addSun(300, 300, false);
   ok(g.collect(300, 420) === false, '离得太远收集不到');
   g.state = 'paused';
@@ -101,7 +102,7 @@ section('瓜子射击与击杀');
   g.cooldowns.fill(0);
   g.enemies.length = 0; g.spawn('wilt', 2, 700);
   const zombie = g.enemies[0];
-  for (let i = 0; i < 120 && zombie.hp > 0; i++) g.update(1 / 60);
+  for (let i = 0; i < 8 * 60 && zombie.hp > 0; i++) g.update(1 / 60); // 子弹飞行+射击间隔约需 7 秒
   ok(zombie.hp <= 0, `射手能击杀同行僵尸（剩余血量 ${zombie.hp}）`);
   ok(g.kills === 1, '击杀数 +1');
   g.enemies.length = 0; g.spawn('wilt', 4, 700);
@@ -116,7 +117,7 @@ section('冰露减速');
   g.sun = 500;
   g.plant(2, 1, 1); // ice row 1
   g.enemies.length = 0; g.spawn('wilt', 1, 750);
-  for (let i = 0; i < 90; i++) g.update(1 / 60);
+  for (let i = 0; i < 4 * 60; i++) g.update(1 / 60); // 冰弹约 1.7 秒后命中，减速持续 3 秒
   ok(g.enemies[0].slow > 0, '被冰瓜子命中后处于减速状态');
   const x0 = g.enemies[0].x;
   g.enemies[0].slow = 0;
@@ -128,11 +129,12 @@ section('冰露减速');
 section('啃咬与植物阵亡');
 {
   const g = new Game(seeded(5)); g.reset(0);
+  for (const s of g.schedule) s.time = 9999; g.spawnIndex = g.schedule.length; // 冻结常规波次，只看这一只
   g.enemies.length = 0; g.spawn('wilt', 3, 600);
   g.sun = 500; g.plant(3, 3, 2); // wall row 3
   const wall = g.plants[0];
   ok(wall.hp === 1400, '铁壳葵初始血量 1400');
-  for (let i = 0; i < 600 && wall.hp > 0; i++) g.update(1 / 60);
+  for (let i = 0; i < 75 * 60 && wall.hp > 0; i++) g.update(1 / 60); // 走近 14 秒 + 啃穿约 58 秒
   ok(wall.hp <= 0, `僵尸能啃穿植物（剩余 ${wall.hp}）`);
   ok(!g.plants.some(p => p === wall), '阵亡植物从场上移除');
 }
@@ -141,7 +143,7 @@ section('烈日葵爆炸');
 {
   const g = new Game(seeded(6)); g.reset(0);
   g.enemies.length = 0;
-  g.spawn('wilt', 2, 620); g.spawn('wilt', 1, 640); g.spawn('wilt', 4, 630);
+  g.spawn('wilt', 2, 600); g.spawn('wilt', 1, 610); g.spawn('wilt', 3, 590); // 爆炸行及上下各一行，且都在 165 半径内
   g.sun = 500; g.plant(4, 2, 3); // bomb row 2
   for (let i = 0; i < 90; i++) g.update(1 / 60);
   ok(g.enemies.length === 0, '爆炸清除相邻三行的敌人');
@@ -165,13 +167,13 @@ section('翠玉瓜葵抛射');
 section('小推车救援与失败');
 {
   const g = new Game(seeded(8)); g.reset(0);
-  g.enemies.length = 0; g.spawn('wilt', 0, 300);
+  g.enemies.length = 0; g.spawn('wilt', 0, 170); // 离左端约 4 秒路程
   for (let i = 0; i < 300 && g.state === 'playing'; i++) g.update(1 / 60);
   ok(g.mowers[0].state === 'active' || g.mowers[0].state === 'used', '僵尸靠近左端触发小推车');
   ok(g.enemies.length === 0, '小推车清掉该行僵尸');
   ok(g.state === 'playing', '小推车救援后游戏继续');
   // Second breach of the same row ends the game.
-  g.spawn('wilt', 0, 260);
+  g.spawn('wilt', 0, 160);
   for (let i = 0; i < 600 && g.state === 'playing'; i++) g.update(1 / 60);
   ok(g.state === 'lost', '同一行第二次突破则失败');
 }
@@ -184,14 +186,17 @@ section('胜利判定');
   g.spawnIndex = g.schedule.length;
   ok(g.state === 'playing', '场上无敌且未刷新完不提前胜利');
   g.spawn('wilt', 2, 900);
-  for (let i = 0; i < 240 && g.state === 'playing'; i++) g.update(1 / 60);
+  for (let i = 0; i < 120; i++) g.update(1 / 60);
+  ok(g.state === 'playing', '场上还有敌人时不提前胜利');
+  g.hurt(g.enemies[0], 9999); // 击退最后一只
+  for (let i = 0; i < 60 && g.state === 'playing'; i++) g.update(1 / 60);
   ok(g.state === 'won', `清完全部波次后胜利（击退 ${g.kills} 只）`);
 }
 
 section('暂停与时间控制');
 {
   const g = new Game(seeded(10)); g.reset(0);
-  g.update(1); ok(g.time > 0.9, '时间正常推进');
+  for (let i = 0; i < 20; i++) g.update(1); ok(g.time > 0.9, '时间正常推进'); // 单帧 delta 被钳到 0.05，分帧推进
   const t = g.time;
   g.pause(); g.update(5); g.update(5);
   ok(g.time === t, '暂停时时间冻结');
@@ -280,6 +285,110 @@ section('合体进化');
   ok(g.sun === 0 && g.fuseCard(0, 0, 8) !== null, '阳光不足时卡牌合体被拒绝');
   g.state = 'paused';
   ok(g.fuse(g.plants[0], 4, 0) === false, '暂停时不能合体');
+}
+
+section('三级合体链');
+{
+  const g = new Game(seeded(20)); g.reset(0);
+  g.sun = 9999; g.cooldowns.fill(0);
+  g.plant(1, 2, 1); g.cooldowns.fill(0); g.plant(1, 2, 3);
+  const a = g.plants.find(p => p.col === 1), b = g.plants.find(p => p.col === 3);
+  ok(g.fuse(a, 2, 3) === true, '1级+1级 合体为 2 级');
+  const lv2 = g.plants[0];
+  ok(lv2.level === 2, '合体产物是 2 级');
+  g.cooldowns.fill(0); g.plant(1, 2, 5);
+  const one = g.plants.find(p => p.col === 5);
+  ok(g.fuse(one, 2, 3) === true, '2级+1级 合体为 3 级');
+  ok(g.plants.length === 1 && g.plants[0].level === 3, '场上只剩一株 3 级植物');
+  ok(g.plants[0].hp === PLANTS[1].hp * 3, `3 级血量为三倍（${g.plants[0].hp}）`);
+  // 满级与 2+2 都不能继续合
+  g.cooldowns.fill(0); g.plant(1, 2, 7);
+  ok(g.fuse(g.plants.find(p => p.col === 7), 2, 3) === false, '3 级满级植物不能再合体');
+  g.plants.length = 0; g.cooldowns.fill(0);
+  g.plant(1, 1, 1); g.cooldowns.fill(0); g.plant(1, 1, 3); g.cooldowns.fill(0); g.plant(1, 1, 5); g.cooldowns.fill(0); g.plant(1, 1, 7);
+  g.fuse(g.plants.find(p => p.col === 1), 1, 3);
+  g.fuse(g.plants.find(p => p.col === 5), 1, 7);
+  ok(g.fuse(g.plants.find(p => p.col === 3), 1, 7) === false, '两株 2 级植物不能合体');
+  // 卡牌拖到 2 级植物上升 3 级；拖到 3 级上被拒绝
+  const lv2b = g.plants.find(p => p.col === 3);
+  g.sun = 9999; g.cooldowns.fill(0);
+  ok(g.fuseCard(2, 1, 3) === null, '卡牌拖到 2 级植物上合为 3 级');
+  const lv3b = g.plants.find(p => p.col === 3);
+  ok(lv3b.level === 3 && lv3b.kinds.includes('ice') && lv3b.kinds.includes('seed'), '3 级混血携带两种本领');
+  ok(g.fuseCard(0, 1, 3) !== null, '卡牌拖到 3 级满级植物上被拒绝');
+  // 3 级暖阳葵产 75 大太阳
+  g.plants.length = 0; g.cooldowns.fill(0); g.sun = 9999;
+  g.plant(0, 2, 1); g.cooldowns.fill(0); g.plant(0, 2, 3); g.cooldowns.fill(0); g.plant(0, 2, 5);
+  g.fuse(g.plants.find(p => p.col === 1), 2, 3);
+  g.fuse(g.plants.find(p => p.col === 5), 2, 3);
+  g.suns.length = 0;
+  for (let i = 0; i < 7 * 60; i++) g.update(1 / 60);
+  ok(g.suns.some(s => s.value === 75), '3 级暖阳葵产出 75 大太阳');
+}
+
+section('无敌模式');
+{
+  const g = new Game(seeded(22)); g.reset(0);
+  g.cheat = true;
+  g.sun = 0; g.cooldowns.fill(0);
+  ok(g.plant(0, 2, 1) === null, '阳光为 0 也能种植');
+  ok(g.sun === 0 && g.cooldowns[0] === 0, '无敌模式不扣阳光、不进冷却');
+  ok(g.fuseCard(1, 2, 1) === null, '无敌模式卡牌合体不扣阳光');
+  g.enemies.length = 0; g.spawn('wilt', 2, 600);
+  for (let i = 0; i < 300; i++) g.update(1 / 60);
+  ok(g.plants.every(p => p.hp === p.maxHp), '无敌模式植物不掉血');
+  g.cheat = false;
+  g.sun = 0;
+  ok(g.plant(0, 1, 1) !== null, '关闭无敌后恢复阳光限制');
+}
+
+section('难度倍率');
+{
+  const g = new Game(seeded(23)); g.reset(0);
+  const base = g.spawn('wilt', 2).maxHp;
+  g.difficulty = 2;
+  const hard = g.spawn('wilt', 2).maxHp;
+  ok(hard === base * 2, `难度 ×2 僵尸血量翻倍（${base}→${hard}）`);
+  g.difficulty = 0.5;
+  const easy = g.spawn('wilt', 2).maxHp;
+  ok(easy === Math.round(base / 2), `难度 ×0.5 僵尸血量减半（${easy}）`);
+  g.difficulty = 1;
+  ok(g.spawn('wilt', 2).maxHp === base, '恢复 ×1 原血量');
+}
+
+section('气球葵尸');
+{
+  const g = new Game(seeded(24)); g.reset(0);
+  const e = g.spawn('balloon', 2, 700);
+  ok(e.flying === true, '气球葵尸是飞行单位');
+  // 瓜子射手打不到气球
+  g.enemies.length = 0; g.spawn('balloon', 2, 700);
+  g.sun = 9999; g.cooldowns.fill(0); g.plant(1, 2, 1);
+  for (let i = 0; i < 10 * 60; i++) g.update(1 / 60);
+  ok(g.enemies[0].hp === g.enemies[0].maxHp, '瓜子射手打不到气球葵尸');
+  ok(g.shots.length === 0, '射手不会朝气球浪费瓜子');
+  // 气球从植物头顶飘过，不啃咬
+  g.enemies.length = 0; g.spawn('balloon', 2, 300);
+  for (let i = 0; i < 5 * 60; i++) g.update(1 / 60);
+  ok(g.plants.every(p => p.hp === p.maxHp), '气球葵尸不啃咬植物');
+  // 翠玉瓜葵的西瓜能砸下气球
+  for (const s of g.schedule) s.time = 9999; g.spawnIndex = g.schedule.length; // 冻结常规波次，只看气球
+  g.enemies.length = 0; g.shots.length = 0; g.cooldowns.fill(0); g.sun = 9999;
+  g.plant(5, 2, 3);
+  g.spawn('balloon', 2, 700);
+  for (let i = 0; i < 20 * 60; i++) g.update(1 / 60);
+  ok(g.enemies.length === 0, '翠玉瓜葵的西瓜能砸下气球葵尸');
+  // 烈日葵的地爆伤不到气球
+  g.plants.length = 0; g.shots.length = 0; g.enemies.length = 0; g.cooldowns.fill(0); g.sun = 9999;
+  g.plant(4, 2, 6);
+  g.spawn('balloon', 2, 620);
+  for (let i = 0; i < 3 * 60; i++) g.update(1 / 60);
+  ok(g.enemies.length === 1 && g.enemies[0].hp === g.enemies[0].maxHp, '烈日葵地爆伤不到气球葵尸');
+  // 小推车仍是最后防线
+  g.plants.length = 0; g.enemies.length = 0; g.state = 'playing'; // 上一段清场后会误判胜利，拨回继续
+  g.spawn('balloon', 2, 200);
+  for (let i = 0; i < 600 && g.state === 'playing'; i++) g.update(1 / 60);
+  ok(g.mowers[2].state !== 'ready' && g.state !== 'lost' && g.enemies.length === 0, '气球葵尸越过防线时小推车仍然生效');
 }
 
 console.log(`\n结果：${passed} 通过，${failed} 失败`);

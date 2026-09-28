@@ -15,8 +15,10 @@
     unlocked = Math.max(0, Math.min(2, Math.floor(Number(saved.unlocked) || 0)));
     soundOn = saved.sound !== false;
     bestWave = Math.max(0, Math.floor(Number(saved.bestWave) || 0));
+    const diff = Math.round(Number(saved.difficulty) || 100) / 100;
+    if (diff >= 0.5 && diff <= 5) game.difficulty = diff;
   } catch (_) { /* Private browsing or a damaged save must not prevent playing. */ }
-  function save() { try { localStorage.setItem(storageKey, JSON.stringify({ unlocked, sound: soundOn, bestWave })); } catch (_) {} }
+  function save() { try { localStorage.setItem(storageKey, JSON.stringify({ unlocked, sound: soundOn, bestWave, difficulty: game.difficulty })); } catch (_) {} }
   function initAudio() {
     if (!soundOn) return;
     try {
@@ -81,14 +83,14 @@
       line(c, [[-6, -5], [6, -5]], '#493427', 2);
       if (hp < 0.65) line(c, [[-19, -30], [-7, -18], [-15, -5], [-3, 8]], '#68492c', 3);
     } else {
-      flower(c, 0, -26, kind === 'bomb' ? 26 + Math.sin(age * 16) * 2 : level === 2 ? 31 : 27, color, core);
+      flower(c, 0, -26, kind === 'bomb' ? 26 + Math.sin(age * 16) * 2 : 27 + (level - 1) * 4, color, core);
       for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ellipse(c, Math.cos(a) * 15, -26 + Math.sin(a) * 15, 1.3, 1.3, '#ffffff23'); }
       if (kind === 'seed' || kind === 'ice') {
         ellipse(c, 21, -23, 15, 10, kind === 'ice' ? '#88cbd0' : '#cda554', 0, '#5e562e');
         ellipse(c, 31, -23, 5, 7, '#3e4434');
-        if (level === 2) { // 双炮管：第二根炮筒架在上方
-          ellipse(c, 21, -38, 15, 10, kind === 'ice' ? '#88cbd0' : '#cda554', 0, '#5e562e');
-          ellipse(c, 31, -38, 5, 7, '#3e4434');
+        for (let b = 1; b < level; b++) { // 升级后逐级加装炮筒
+          ellipse(c, 21, -23 - b * 15, 15, 10, kind === 'ice' ? '#88cbd0' : '#cda554', 0, '#5e562e');
+          ellipse(c, 31, -23 - b * 15, 5, 7, '#3e4434');
         }
         ellipse(c, -5, -32, 3, 4, '#282e22'); ellipse(c, 7, -32, 3, 4, '#282e22');
         line(c, [[-9, -40], [-2, -38]], '#3d352b', 2);
@@ -108,17 +110,21 @@
       }
       if (kind === 'bomb') { line(c, [[0, -49], [6, -64], [12, -65]], '#593c2a', 3); ellipse(c, 13, -65, 4, 4, '#ffdc64'); }
     }
-    if (level === 2 && kinds && kinds.length > 1) { // 混血徽记：左肩开出副本领的小花
+    if (level >= 2 && kinds && kinds.length > 1) { // 混血徽记：左肩开出副本领的小花
       kinds.slice(1).forEach((k, i) => {
         const spot = { sun: [-24, -50], seed: [-24, -44], ice: [-24, -44], wall: [-24, -50], bomb: [-24, -54] }[k] || [-24, -46];
         flower(c, spot[0], spot[1] + i * -12, 8, PLANTS.find(s => s.id === k).color, '#81512f');
       });
     }
-    if (level === 2) { // 金星徽章：进化标记
-      c.save(); c.translate(0, kind === 'wall' ? -62 : -76); c.rotate(reduceMotion ? 0 : Math.sin(age * 2) * 0.1);
-      c.beginPath();
-      for (let i = 0; i < 10; i++) { const r = i % 2 ? 4.5 : 10, ang = -Math.PI / 2 + i * Math.PI / 5; c.lineTo(Math.cos(ang) * r, Math.sin(ang) * r); }
-      c.closePath(); c.fillStyle = '#ffd94f'; c.fill(); c.strokeStyle = '#9a6a1c'; c.lineWidth = 1.5; c.stroke();
+    if (level >= 2) { // 金星徽章：升到几级就挂几颗（level-1 颗）
+      c.save(); c.translate(0, kind === 'wall' ? -62 : -76 - (level > 2 ? 4 : 0)); c.rotate(reduceMotion ? 0 : Math.sin(age * 2) * 0.1);
+      for (let s = 0; s < level - 1; s++) {
+        c.save(); c.translate((s - (level - 2) / 2) * 16, 0); c.scale(level > 2 ? 0.85 : 1, level > 2 ? 0.85 : 1);
+        c.beginPath();
+        for (let i = 0; i < 10; i++) { const r = i % 2 ? 4.5 : 10, ang = -Math.PI / 2 + i * Math.PI / 5; c.lineTo(Math.cos(ang) * r, Math.sin(ang) * r); }
+        c.closePath(); c.fillStyle = '#ffd94f'; c.fill(); c.strokeStyle = '#9a6a1c'; c.lineWidth = 1.5; c.stroke();
+        c.restore();
+      }
       c.restore();
     }
     c.restore();
@@ -140,14 +146,24 @@
   // Every type gets its own silhouette, gait and posture so they read apart at a glance.
   function drawEnemy(c, e) {
     const t = e.type, a = e.age, frozen = e.slow > 0, still = reduceMotion || e.biting;
-    const skin = e.hit ? '#e2cf9d' : { wilt: '#6f7a58', flag: '#74815a', pot: '#6a7455', runner: '#7c8a5f', bucket: '#5f6d52', bruiser: '#5c6a4c', giant: '#4e5a42' }[t];
-    const petal = frozen ? '#b4dee5' : { wilt: '#a9a25a', flag: '#e8cd54', pot: '#cdb972', runner: '#d8b545', bucket: '#a8b598', bruiser: '#97a06b', giant: '#7d8a55' }[t];
-    const bar = { wilt: -84, flag: -88, pot: -102, runner: -80, bucket: -102, bruiser: -98, giant: -124 }[t];
+    const skin = e.hit ? '#e2cf9d' : { wilt: '#6f7a58', flag: '#74815a', pot: '#6a7455', runner: '#7c8a5f', bucket: '#5f6d52', bruiser: '#5c6a4c', giant: '#4e5a42', balloon: '#74815a' }[t];
+    const petal = frozen ? '#b4dee5' : { wilt: '#a9a25a', flag: '#e8cd54', pot: '#cdb972', runner: '#d8b545', bucket: '#a8b598', bruiser: '#97a06b', giant: '#7d8a55', balloon: '#d8b545' }[t];
+    const bar = { wilt: -84, flag: -88, pot: -102, runner: -80, bucket: -102, bruiser: -98, giant: -124, balloon: -150 }[t];
     c.save(); c.translate(e.x, e.y);
     ellipse(c, 0, 28, t === 'pot' || t === 'bruiser' ? 34 : t === 'giant' ? 44 : t === 'runner' ? 22 : 29, 8, '#23382132');
-    const step = still ? 0 : Math.sin(a * { wilt: 3, flag: 8, pot: 3.2, runner: 16, bucket: 4, bruiser: 2.2, giant: 1.5 }[t]) * { wilt: 4, flag: 10, pot: 9, runner: 8, bucket: 3, bruiser: 12, giant: 17 }[t];
+    const step = still ? 0 : Math.sin(a * { wilt: 3, flag: 8, pot: 3.2, runner: 16, bucket: 4, bruiser: 2.2, giant: 1.5, balloon: 2.4 }[t]) * { wilt: 4, flag: 10, pot: 9, runner: 8, bucket: 3, bruiser: 12, giant: 17, balloon: 5 }[t];
     const bob = still ? 0 : Math.abs(step) * 0.25;
-    if (t === 'wilt') { // 弓着背、拖着脚、眼皮耷拉的普通僵尸
+    if (t === 'balloon') { // 气球葵尸：吊在气球下从植物头顶飘过，只有西瓜砸得到
+      const sway = still ? 0 : Math.sin(a * 1.6) * 6;
+      c.translate(sway, bob);
+      ellipse(c, 0, -100, 33, 39, frozen ? '#9fd7e0' : e.hit ? '#f0917f' : '#e8635a', 0, '#a03328');
+      ellipse(c, -12, -112, 9, 12, '#ffffff50');
+      line(c, [[sway * 0.5, -62], [0, -44]], '#7c5a33', 2);
+      line(c, [[-9, -38], [-4, -56]], '#8b9d66', 5); line(c, [[9, -38], [4, -56]], '#8b9d66', 5); // 双手抓着气球绳
+      rounded(c, -13, -44, 26, 34, 8, skin, '#46553b');
+      line(c, [[-6, -11], [-11 - step * 0.6, 8]], '#556548', 6); line(c, [[6, -11], [11 + step * 0.6, 8]], '#556548', 6); // 悬空的腿晃啊晃
+      zombieHead(c, petal, e.hit, { size: 20, grin: true });
+    } else if (t === 'wilt') { // 弓着背、拖着脚、眼皮耷拉的普通僵尸
       c.translate(0, bob); c.rotate(0.13);
       line(c, [[-8, 8], [-12 - step, 28]], '#556548', 9); line(c, [[8, 8], [13 + step, 28]], '#556548', 9);
       ellipse(c, -12 - step, 29, 12, 6, '#59493a'); ellipse(c, 13 + step, 29, 12, 6, '#59493a');
@@ -285,7 +301,7 @@
     if (game.state === 'menu') {
       for (let row = 0; row < 5; row++) { drawPlant(ctx, 'sun', center(row, 0).x, center(row, 0).y, 1, clock + row); drawPlant(ctx, 'seed', center(row, 1).x, center(row, 1).y, 1, clock + row); }
       drawPlant(ctx, 'ice', 468, 468, 1, clock); drawPlant(ctx, 'wall', 764, 371, 1, clock);
-      ['wilt', 'pot', 'bucket', 'runner', 'bruiser', 'giant', 'flag'].forEach((type, i) => drawEnemy(ctx, { type, x: 930 + i % 2 * 80, y: 168 + i * 70, age: clock + i, hp: 100, maxHp: 100 }));
+      ['wilt', 'pot', 'bucket', 'runner', 'bruiser', 'giant', 'flag', 'balloon'].forEach((type, i) => drawEnemy(ctx, { type, x: 930 + i % 2 * 80, y: 160 + i * 62, age: clock + i, hp: 100, maxHp: 100 }));
     }
     for (let row = 0; row < 5; row++) {
       const entities = [...game.plants.filter(p => p.row === row).map(p => ({ p, x: p.x })), ...game.enemies.filter(e => e.row === row).map(e => ({ e, x: e.x }))].sort((a, b) => a.x - b.x);
@@ -293,15 +309,15 @@
         if (item.p) {
           const p = item.p;
           if (plantDrag && plantDrag.moved && p === plantDrag.plant) continue;
-          drawPlant(ctx, p.kind, p.x, p.y, Math.min(1, 0.65 + p.age * 3) * (p.level === 2 ? 1.15 : 1), p.age, p.hp / p.maxHp, p.hit > 0, p.level, p.kinds);
+          drawPlant(ctx, p.kind, p.x, p.y, Math.min(1, 0.65 + p.age * 3) * (1 + (p.level - 1) * 0.15), p.age, p.hp / p.maxHp, p.hit > 0, p.level, p.kinds);
           if (p.hp < p.maxHp) { rounded(ctx, p.x - 23, p.y + 33, 46, 5, 2, '#3e653b'); rounded(ctx, p.x - 22, p.y + 34, Math.max(0, p.hp / p.maxHp * 44), 3, 1, '#ffe39b'); }
         } else drawEnemy(ctx, item.e);
       }
       drawMower(ctx, game.mowers[row]);
     }
     if (plantDrag && plantDrag.moved) {
-      // Glow every level-1 plant that can fuse with the plant in hand — any kind works.
-      for (const p of game.plants) if (p !== plantDrag.plant && p.level === 1) {
+      // Glow every plant that can fuse with the plant in hand — levels must add up to 3 or less.
+      for (const p of game.plants) if (p !== plantDrag.plant && p.level + plantDrag.plant.level <= 3) {
         const spot = center(p.row, p.col);
         rounded(ctx, spot.x - B.w / 2 + 2, spot.y - B.h / 2 + 2, B.w - 4, B.h - 4, 8, '#ffe27a45', '#ffd94f', 3);
       }
@@ -367,10 +383,11 @@
       const cell = game.cell(toField(event).x, toField(event).y);
       if (cell) {
         const dest = game.plants.find(v => v.row === cell.row && v.col === cell.col);
-        if (dest && dest.level === 1) {
-          // Dropping a card straight onto a plant fuses them into a level-2 hybrid.
+        if (dest && dest.level < 3) {
+          // Dropping a card straight onto a plant fuses them (1级+1级=2级，卡牌+2级=3级).
           const error = game.fuseCard(i, cell.row, cell.col);
-          message(error || `${PLANTS[i].name}与${PLANTS.find(s => s.id === dest.kind).name}合体，进化成功！`);
+          if (error) message(error);
+          else { const fused = game.plants.find(v => v.row === cell.row && v.col === cell.col); message(`${PLANTS[i].name}与${PLANTS.find(s => s.id === dest.kind).name}合体，进化到 ${fused.level} 级！`); }
         } else {
           keyboardCell = cell;
           message(game.plant(i, cell.row, cell.col) || `${PLANTS[i].name}已种下。`);
@@ -395,9 +412,10 @@
   }
   let lastSun = -1;
   function updateUI() {
-    if (game.sun !== lastSun) { $('sun').textContent = game.sun; lastSun = game.sun; }
+    const sunShown = game.cheat ? '∞' : game.sun;
+    if (sunShown !== lastSun) { $('sun').textContent = sunShown; lastSun = sunShown; }
     cardButtons.forEach((button, i) => {
-      button.classList.toggle('selected', selected === i); button.classList.toggle('unavailable', game.sun < PLANTS[i].cost || game.cooldowns[i] > 0);
+      button.classList.toggle('selected', selected === i); button.classList.toggle('unavailable', !game.cheat && (game.sun < PLANTS[i].cost || game.cooldowns[i] > 0));
       button.setAttribute('aria-pressed', String(selected === i));
       button.querySelector('.cooldown').style.height = `${game.cooldowns[i] / PLANTS[i].cooldown * 100}%`;
       button.querySelector('.price').textContent = game.cooldowns[i] > 0 ? `${Math.ceil(game.cooldowns[i])} 秒` : `☀ ${PLANTS[i].cost}`;
@@ -449,6 +467,38 @@
   $('pause').addEventListener('click', togglePause);
   $('shovel').addEventListener('click', () => select('shovel'));
   $('sound').addEventListener('click', () => { soundOn = !soundOn; if (soundOn) { initAudio(); tone(640, 0.1); } save(); updateUI(); });
+  // 无敌模式：密码开关，开启后阳光无限、卡牌无冷却、植物不受伤害。
+  function tryCheat() {
+    if ($('cheat-password').value === 'zcheng') {
+      game.cheat = true; $('cheat-dialog').hidden = true;
+      $('cheat').classList.add('active'); $('cheat').textContent = '无敌：开';
+      message('无敌模式开启：阳光无限、卡牌无冷却、植物不受伤害。', 5); updateUI();
+    } else { $('cheat-error').textContent = '密码不对，再想想？'; $('cheat-password').select(); }
+  }
+  $('cheat').addEventListener('click', () => {
+    if (game.cheat) {
+      game.cheat = false; $('cheat').classList.remove('active'); $('cheat').textContent = '无敌模式';
+      message('无敌模式已关闭。'); updateUI(); return;
+    }
+    $('cheat-dialog').hidden = false; $('cheat-password').value = ''; $('cheat-error').textContent = '';
+    $('cheat-password').focus();
+  });
+  $('cheat-ok').addEventListener('click', tryCheat);
+  $('cheat-cancel').addEventListener('click', () => { $('cheat-dialog').hidden = true; });
+  $('cheat-password').addEventListener('keydown', event => {
+    event.stopPropagation(); // 输密码时不触发游戏快捷键
+    if (event.key === 'Enter') tryCheat();
+    if (event.key === 'Escape') $('cheat-dialog').hidden = true;
+  });
+  // 难度滑动条：只放大/缩小此后出场的僵尸血量。
+  const diffInput = $('difficulty');
+  function diffLabel() { return `×${String(game.difficulty).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')}`; }
+  diffInput.value = String(Math.round(game.difficulty * 100));
+  $('diff-value').textContent = diffLabel();
+  diffInput.addEventListener('input', () => {
+    game.difficulty = diffInput.value / 100; $('diff-value').textContent = diffLabel();
+    message(`僵尸强度调整为 ${diffLabel()}（对之后出场的僵尸生效）。`); save();
+  });
   $('restart').addEventListener('click', () => {
     if (game.state === 'menu') return;
     const oldState = game.state; game.pause();
@@ -461,7 +511,7 @@
   $('help').addEventListener('click', () => {
     if (modal === 'help') return;
     const oldState = game.state; game.pause();
-    showModal('help', '葵田生存小手册', '① 把植物卡牌拖到草坪上种下。点击太阳可获得 25 阳光。\n② 暖阳葵产阳光；瓜子射手攻击；冰露葵减速；翠玉瓜葵抛西瓜砸一片。\n③ 铁壳葵挡在前面；烈日葵种下后立刻蓄力爆炸。\n④ 合体进化：任意两株 1 级植物都能合体——拖一株到另一株上，或把卡牌直接拖到已种下的植物上！不同种类合出混血大植物，同时拥有两种本领（如暖阳葵＋瓜子射手＝又产阳光又射击）；相同种类则进化成本领更强的 2 级形态。\n⑤ 铲子一铲一除；每行小推车全场只能救援一次，之后别让僵尸到最左边！\n数字 1–5 选卡 · S 铲除 · Esc 取消 · 空格暂停\n方向键选格 + 回车种植；C 收集一个太阳。', '知道了', () => {
+    showModal('help', '葵田生存小手册', '① 把植物卡牌拖到草坪上种下。点击太阳可获得 25 阳光。\n② 暖阳葵产阳光；瓜子射手攻击；冰露葵减速；翠玉瓜葵抛西瓜砸一片——空中飘着的气球葵尸也只有它能砸下来。\n③ 铁壳葵挡在前面；烈日葵种下后立刻蓄力爆炸。\n④ 合体进化：任意两株植物都能合体——拖一株到另一株上，或把卡牌直接拖到已种下的植物上！1级+1级=2级（相同种类进化出更强形态，不同种类合出同时拥有两种本领的混血大植物）；2级+1级=3级（本领更强，挂两颗金星）。\n⑤ 铲子一铲一除；每行小推车全场只能救援一次，之后别让僵尸到最左边！\n数字 1–5 选卡 · S 铲除 · Esc 取消 · 空格暂停\n方向键选格 + 回车种植；C 收集一个太阳。', '知道了', () => {
       if (oldState === 'playing') resumeGame();
       else if (oldState === 'menu') menu();
       else if (oldState === 'paused') { game.state = 'playing'; pauseGame(); }
@@ -535,10 +585,11 @@
       if (cell && (cell.row !== d.plant.row || cell.col !== d.plant.col)) {
         const dest = game.plants.find(v => v.row === cell.row && v.col === cell.col);
         if (game.fuse(d.plant, cell.row, cell.col)) {
+          const fused = game.plants.find(v => v.row === cell.row && v.col === cell.col);
           const a = PLANTS.find(s => s.id === d.plant.kind).name, b = PLANTS.find(s => s.id === dest.kind).name;
-          message(a === b ? `两株${a}合体，进化成功！` : `${a}与${b}合体，新的伙伴同时拥有两种本领！`);
+          message(a === b ? `两株${a}合体，进化到 ${fused.level} 级！` : `${a}与${b}合体，进化到 ${fused.level} 级，本领更多了！`);
         }
-        else if (dest) message(dest.level === 2 ? '那株植物已经进化到极限了。' : '只能与 1 级植物合体。');
+        else if (dest) message(dest.level >= 3 ? '那株植物已经 3 级满级了。' : '两株 2 级植物不能合体，拖一株 1 级植物（或卡牌）来升级吧。');
         else message('松手的位置没有可以合体的植物。');
         updateUI();
       }
