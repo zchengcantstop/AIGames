@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>向日葵保卫战</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <main class="game-shell">
-<header><div class="brand"><span class="brand-flower">✿</span><div><h1>向日葵保卫战</h1><p>守住这一小片阳光。</p></div></div><nav><button id="sound">音效：开</button><button id="help">玩法说明</button><button id="pause">暂停</button><button id="restart">重开本关</button></nav></header>
+<header><div class="brand"><span class="brand-flower">✿</span><div><h1>向日葵保卫战<span class="fuse-tip">✦ 任意两株植物可合体升级</span></h1><p>守住这一小片阳光。</p></div></div><nav><button id="sound">音效：开</button><button id="help">玩法说明</button><button id="pause">暂停</button><button id="restart">重开本关</button></nav></header>
 <section class="garden">
 <div class="rack"><div class="sun-bank"><span>☀</span><strong id="sun">200</strong><small>可用阳光</small></div><div id="cards" class="cards"></div><button id="shovel" class="shovel">♠<span>铲除</span><small>快捷键 S</small></button></div>
 <div class="field-wrap"><canvas id="field" width="1100" height="650" tabindex="0" aria-label="五行九列战场；方向键选择格子，回车种植或收集阳光，数字键选择植物">请使用支持 Canvas 的浏览器。</canvas><div id="overlay" class="overlay"><div class="dialog"><span class="dialog-flower">✿</span><p id="eyebrow">一场发生在葵田里的小小战役</p><h2 id="dialog-title">阳光，由我们守护。</h2><p id="dialog-text"></p><div id="level-buttons"></div><button id="primary" class="primary">开始守护</button><button id="secondary" hidden>返回游戏</button></div></div></div>
