@@ -21,14 +21,24 @@
     giant: { name: '超级巨大葵尸', hp: 1600, speed: 7, damage: 90 },
     balloon: { name: '气球葵尸', hp: 300, speed: 13, damage: 0, flying: true }
   });
-  const LEVELS = Object.freeze(WAVE_CONFIG.levels.concat([WAVE_CONFIG.endless]));
+  const LEVELS = Object.freeze(WAVE_CONFIG.levels.concat([WAVE_CONFIG.endless, WAVE_CONFIG.roguelike]));
+  // 传送带卡池：不含暖阳葵（传送带模式下没有阳光经济，产阳光没有意义）。
+  // 卡池带权重：烈日葵、铁壳葵多刷（各 5 份），西瓜最少（1 份），其余居中。
+  const BELT_POOL = Object.freeze([
+    'seed', 'seed', 'seed', 'ice', 'ice', 'ice',
+    'wall', 'wall', 'wall', 'wall', 'wall',
+    'bomb', 'bomb', 'bomb', 'bomb', 'bomb',
+    'melon'
+  ]);
   const center = (row, col) => ({ x: BOARD.x + (col + 0.5) * BOARD.w, y: BOARD.y + (row + 0.5) * BOARD.h });
   class Game {
     constructor(random = Math.random) { this.random = random; this.cheat = false; this.difficulty = 1; this.reset(0); this.state = 'menu'; }
+    get conveyor() { return !!LEVELS[this.level].conveyor; }
     reset(level = 0) {
       this.level = Math.max(0, Math.min(LEVELS.length - 1, Math.floor(Number(level) || 0)));
       this.endless = !!LEVELS[this.level].endless;
       this.state = 'playing'; this.time = 0; this.sun = 200; this.wave = 0; this.kills = 0;
+      this.belt = []; this.beltTimer = this.conveyor ? 1.2 : 0;
       this.plants = []; this.enemies = []; this.shots = []; this.suns = []; this.effects = []; this.events = [];
       this.cooldowns = PLANTS.map(() => 0); this.mowers = Array.from({ length: 5 }, (_, row) => ({ row, x: 91, state: 'ready' }));
       this.dragged = null;
@@ -82,8 +92,35 @@
         this.sun -= spec.cost;
       }
       this.cooldowns[index] = this.cheat ? 0 : spec.cooldown;
-      const p = { ...center(row, col), id: this.nextId++, kind: spec.id, kinds: [spec.id], row, col, level: 1, hp: spec.hp, maxHp: spec.hp, timer: spec.id === 'bomb' ? 1.1 : 0.5, sunTimer: 7, age: 0, hit: 0, burst: 0, burstT: 0 };
+      return this.place(spec.id, row, col);
+    }
+    // Actually put a plant of the given kind on the lawn (no cost checks here).
+    place(kind, row, col) {
+      const spec = PLANTS.find(s => s.id === kind);
+      const p = { ...center(row, col), id: this.nextId++, kind, kinds: [kind], row, col, level: 1, hp: spec.hp, maxHp: spec.hp, timer: kind === 'bomb' ? 1.1 : 0.5, sunTimer: 7, age: 0, hit: 0, burst: 0, burstT: 0 };
       this.plants.push(p); this.emit('plant', { x: p.x, y: p.y }); return null;
+    }
+    // 传送带模式：卡免费，但只能用滑过来的那株。
+    plantBelt(id, row, col) {
+      if (this.state !== 'playing') return '请先开始或继续游戏';
+      if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || row >= 5 || col < 0 || col >= 9) return '请种在草坪格子里';
+      if (this.plants.some(p => p.row === row && p.col === col)) return '这里已经有一株向日葵了';
+      const item = this.belt.find(i => i.id === id);
+      if (!item) return '那张卡已经滑走了';
+      this.belt = this.belt.filter(i => i !== item);
+      return this.place(item.kind, row, col);
+    }
+    // 传送带卡直接拖到已种植物上：免费合体。
+    fuseBelt(id, row, col) {
+      if (this.state !== 'playing') return '请先开始或继续游戏';
+      const dest = this.plants.find(p => p.row === row && p.col === col);
+      if (!dest || dest.level >= 3) return '只能拖到 3 级以下的植物上合体';
+      const item = this.belt.find(i => i.id === id);
+      if (!item) return '那张卡已经滑走了';
+      this.belt = this.belt.filter(i => i !== item);
+      this.plants = this.plants.filter(p => p !== dest);
+      this.evolve([item.kind, ...dest.kinds], row, col, dest.level + 1, dest.maxHp + PLANTS.find(s => s.id === item.kind).hp);
+      return null;
     }
     // Build the fused plant that results from combining two plants:
     // 1级+1级 → 2级（同种进化 / 异种混血），2级+1级 → 3级。
@@ -164,8 +201,9 @@
     spawn(type, row, x = 1064) {
       const spec = ENEMIES[type];
       if (!spec || row < 0 || row > 4) return;
-      // Later levels and deeper endless waves field tougher zombies; the difficulty slider scales HP further.
-      const boost = (this.endless ? 1 + this.wave * 0.07 : 1 + this.level * 0.12) * (this.difficulty || 1);
+      // Later levels and deeper endless waves field tougher zombies; the difficulty slider
+      // and the level's own hpMultiplier (无尽·肉鸽 ×2) scale HP further.
+      const boost = (this.endless ? 1 + this.wave * 0.15 : 1 + this.level * 0.12) * (this.difficulty || 1) * (LEVELS[this.level].hpMultiplier || 1);
       const hp = Math.round(spec.hp * boost);
       const e = { ...spec, type, row, x, y: center(row, 0).y, id: this.nextId++, hp, maxHp: hp, slow: 0, hit: 0, biting: false, age: 0 };
       this.enemies.push(e); return e;
@@ -202,7 +240,18 @@
       this.time += dt;
       this.cooldowns = this.cooldowns.map(value => Math.max(0, value - dt));
       this.nextSun -= dt;
-      if (this.nextSun <= 0) { this.addSun(BOARD.x + 40 + this.random() * 800, 195 + this.random() * 365, true); this.nextSun = 7; }
+      if (!this.conveyor && this.nextSun <= 0) { this.addSun(BOARD.x + 40 + this.random() * 800, 195 + this.random() * 365, true); this.nextSun = 7; }
+      // 传送带模式：随机植物卡按节奏从右侧滑入，挤满卡槽后最左边的先掉下去。
+      if (this.conveyor) {
+        const cfg = LEVELS[this.level];
+        this.beltTimer -= dt;
+        const interval = Math.max(cfg.beltIntervalFloor || 2.5, (cfg.beltInterval || 5) - this.wave * (cfg.beltIntervalPerWave || 0));
+        if (this.beltTimer <= 0) {
+          if (this.belt.length >= (cfg.beltSlots || 7)) this.belt.shift();
+          this.belt.push({ id: this.nextId++, kind: BELT_POOL[Math.floor(this.random() * BELT_POOL.length)] });
+          this.beltTimer = interval;
+        }
+      }
       if (this.endless && this.spawnIndex >= this.schedule.length - 2) this.addEndlessWave(this.wave + 1);
       while (this.spawnIndex < this.schedule.length && this.schedule[this.spawnIndex].time <= this.time) {
         const next = this.schedule[this.spawnIndex++];
@@ -231,7 +280,8 @@
           if (target) { this.lob(p, target); p.timer = power === 3 ? 1.4 : power === 2 ? 1.8 : 2.6; } else p.timer = 0;
         }
         if (p.kinds.includes('bomb') && p.timer <= 0) {
-          for (const e of this.enemies) if (!e.flying && Math.abs(e.row - p.row) <= 1 && Math.abs(e.x - p.x) < (power === 3 ? 340 : power === 2 ? 260 : 165)) this.hurt(e, power === 3 ? 2000 : power === 2 ? 1200 : 700);
+          // 烈日葵的地爆火光冲天，连气球葵尸也能烧下来。
+          for (const e of this.enemies) if (Math.abs(e.row - p.row) <= 1 && Math.abs(e.x - p.x) < (power === 3 ? 340 : power === 2 ? 260 : 165)) this.hurt(e, power === 3 ? 2000 : power === 2 ? 1200 : 700);
           this.effects.push({ type: 'blast', x: p.x, y: p.y - 16, life: 0.7, maxLife: 0.7, color: '#ffd34f' });
           p.hp = 0; this.emit('bomb');
         }
@@ -278,7 +328,7 @@
       if (!this.endless && this.spawnIndex === this.schedule.length && this.enemies.length === 0) { this.state = 'won'; this.emit('won', { level: this.level }); }
     }
   }
-  const api = { Game, BOARD, PLANTS, ENEMIES, LEVELS, center };
+  const api = { Game, BOARD, PLANTS, ENEMIES, LEVELS, BELT_POOL, center };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SunflowerGame = api;
 })(typeof window !== 'undefined' ? window : globalThis);

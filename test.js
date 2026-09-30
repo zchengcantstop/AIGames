@@ -1,6 +1,6 @@
 /* Core rule tests: node test.js — no third-party dependencies. */
 'use strict';
-const { Game, BOARD, PLANTS, LEVELS } = require('./game.js');
+const { Game, BOARD, PLANTS, LEVELS, BELT_POOL } = require('./game.js');
 
 let passed = 0, failed = 0;
 function ok(condition, label) {
@@ -16,9 +16,10 @@ function seeded(seed) {
 const sunOf = g => g.sun;
 
 section('关卡与排程');
-ok(LEVELS.length === 4, '共 4 个关卡（3 关剧情 + 无尽）');
+ok(LEVELS.length === 5, '共 5 个关卡（3 关剧情 + 无尽 + 无尽·肉鸽）');
 ok(LEVELS.slice(0, 3).every(l => Object.keys(l.waves).length === 3 && l.waves.every(w => Object.values(w).every(n => n > 0))), '剧情关每关 3 波且每波有敌人');
 ok(LEVELS[3].endless === true, '第 4 关是无尽模式');
+ok(LEVELS[4].endless === true && LEVELS[4].conveyor === true, '第 5 关是无尽·肉鸽（传送带）');
 {
   const g = new Game(seeded(7)); g.reset(0);
   ok(g.schedule.length === 77, `第 1 关共 77 只敌人（实际 ${g.schedule.length}）`);
@@ -378,17 +379,73 @@ section('气球葵尸');
   g.spawn('balloon', 2, 700);
   for (let i = 0; i < 20 * 60; i++) g.update(1 / 60);
   ok(g.enemies.length === 0, '翠玉瓜葵的西瓜能砸下气球葵尸');
-  // 烈日葵的地爆伤不到气球
+  // 烈日葵的地爆也能烧下气球
+  g.state = 'playing'; // 上一段清场后会误判胜利，拨回继续
   g.plants.length = 0; g.shots.length = 0; g.enemies.length = 0; g.cooldowns.fill(0); g.sun = 9999;
   g.plant(4, 2, 6);
   g.spawn('balloon', 2, 620);
   for (let i = 0; i < 3 * 60; i++) g.update(1 / 60);
-  ok(g.enemies.length === 1 && g.enemies[0].hp === g.enemies[0].maxHp, '烈日葵地爆伤不到气球葵尸');
+  ok(g.enemies.length === 0, '烈日葵地爆也能击落气球葵尸');
   // 小推车仍是最后防线
   g.plants.length = 0; g.enemies.length = 0; g.state = 'playing'; // 上一段清场后会误判胜利，拨回继续
   g.spawn('balloon', 2, 200);
   for (let i = 0; i < 600 && g.state === 'playing'; i++) g.update(1 / 60);
   ok(g.mowers[2].state !== 'ready' && g.state !== 'lost' && g.enemies.length === 0, '气球葵尸越过防线时小推车仍然生效');
+}
+
+section('无尽·肉鸽传送带');
+{
+  const g = new Game(seeded(25)); g.reset(4);
+  for (const s of g.schedule) s.time = 9999; g.spawnIndex = g.schedule.length; // 冻结僵尸潮，只看传送带
+  ok(g.endless === true && g.conveyor === true, '进入无尽·肉鸽模式');
+  ok(g.belt.length === 0, '开局传送带为空');
+  for (let i = 0; i < 2 * 60; i++) g.update(1 / 60);
+  ok(g.belt.length === 1, '开局 1.2 秒送出第一株植物');
+  ok(g.belt.every(i => ['seed', 'ice', 'wall', 'bomb', 'melon'].includes(i.kind)), '传送带不出暖阳葵（无阳光经济）');
+  {
+    // 卡池带权重：烈日葵/铁壳葵多、西瓜最少
+    const r = seeded(31);
+    const picks = Array.from({ length: 400 }, () => BELT_POOL[Math.floor(r() * BELT_POOL.length)]);
+    const count = k => picks.filter(p => p === k).length;
+    ok(count('wall') + count('bomb') > count('melon') * 3, `烈日葵+铁壳葵远多于西瓜（墙${count('wall')} 炸${count('bomb')} 瓜${count('melon')}）`);
+    ok(BELT_POOL.includes('melon'), '西瓜仍会少量出现（气球僵尸克星）');
+  }
+  // 免费种植，卡从带上消失
+  const item = g.belt[0];
+  const sunBefore = g.sun;
+  ok(g.plantBelt(item.id, 2, 3) === null, '传送带植物免费种下');
+  ok(g.sun === sunBefore, '种植不扣阳光');
+  ok(!g.belt.some(i => i.id === item.id), '用掉的卡从传送带上消失');
+  for (let i = 0; i < 8 * 60; i++) g.update(1 / 60); // 等下一张卡滑来（开局 7 秒一张）
+  ok(g.belt.length >= 1, '传送带持续补充新卡');
+  ok(g.plantBelt(g.belt[0].id, 2, 3) !== null, '种过的格子不能重复种植');
+  // 挤满卡槽后最左边的先掉下去
+  for (let i = 0; i < 48 * 60; i++) g.update(1 / 60); // 7 秒一张，攒满 7 槽
+  ok(g.belt.length === 7, '传送带最多 7 张卡');
+  const oldest = g.belt[0].id;
+  for (let i = 0; i < 8 * 60; i++) g.update(1 / 60); // 第 8 张到来，最左边被挤出
+  ok(g.belt.length === 7 && !g.belt.some(i => i.id === oldest), '第 8 张到来时最左边的卡被挤出');
+  ok(g.plantBelt(item.id + 1000, 1, 1) !== null, '不存在的卡被拒绝');
+  // 卡可拖到植物上免费合体
+  const a = g.belt[0];
+  ok(g.plantBelt(a.id, 1, 1) === null, '再种一株准备合体');
+  const b = g.belt[0];
+  ok(g.fuseBelt(b.id, 1, 1) === null, '传送带卡拖到植物上免费合体');
+  const fused = g.plants.find(p => p.row === 1 && p.col === 1);
+  ok(fused && fused.level === 2, '合体产出 2 级植物');
+  ok(g.fuseBelt(g.belt[0].id, 1, 1) === null, '再合一株升到 3 级');
+  ok(g.plants.find(p => p.row === 1 && p.col === 1).level === 3, '合体链到 3 级');
+  ok(g.fuseBelt(g.belt[0].id, 1, 1) !== null, '3 级满级后不能再合');
+  // 传送带模式下天上不掉阳光
+  g.suns.length = 0;
+  for (let i = 0; i < 30 * 60; i++) g.update(1 / 60);
+  ok(g.suns.length === 0, '传送带模式天上不掉阳光');
+  ok(g.state !== 'lost', '传送带模式不会误判失败');
+  // 肉鸽模式僵尸血量整体 ×2
+  const g2 = new Game(seeded(25)); g2.reset(4);
+  const twin = new Game(seeded(25)); twin.reset(3);
+  const e1 = g2.spawn('wilt', 0), e2 = twin.spawn('wilt', 0);
+  ok(e1.maxHp === e2.maxHp * 2, `肉鸽模式僵尸血量翻倍（${e2.maxHp} → ${e1.maxHp}）`);
 }
 
 console.log(`\n结果：${passed} 通过，${failed} 失败`);

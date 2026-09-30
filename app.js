@@ -6,7 +6,7 @@
   const canvas = $('field'), ctx = canvas.getContext('2d');
   const game = new Game();
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let selected = null, hover = null, keyboardCell = { row: 2, col: 1 }, usingKeyboard = false;
+  let selected = null, selectedBelt = null, hover = null, keyboardCell = { row: 2, col: 1 }, usingKeyboard = false;
   let unlocked = 0, chosenLevel = 0, soundOn = true, audio = null, lastFrame = 0, clock = 0, bestWave = 0;
   let banner = '', bannerUntil = 0, modal = 'menu', primaryAction = null, secondaryAction = null, statusUntil = 0;
   const storageKey = 'sunflower-defense-v1';
@@ -281,7 +281,7 @@
     c.fillStyle = '#a99d77'; c.fillRect(1015, 135, 85, 478);
     for (let i = 0; i < 25; i++) ellipse(c, 1030 + i % 3 * 25, 147 + i * 19, 8, 3, '#8c846530');
     rounded(c, 28, 17, 231, 57, 12, '#fff5d6eF', '#748e5b', 2);
-    text(c, game.endless ? `无尽　${LEVELS[game.level].name}` : `${game.level + 1} / 3　${LEVELS[game.level].name}`, 44, 36, 18, '#365439', 'left', 'bold');
+    text(c, game.conveyor ? `肉鸽　${LEVELS[game.level].name}` : game.endless ? `无尽　${LEVELS[game.level].name}` : `${game.level + 1} / 3　${LEVELS[game.level].name}`, 44, 36, 18, '#365439', 'left', 'bold');
     text(c, game.endless ? `第 ${Math.max(1, game.wave)} 波 · 击退 ${game.kills} 只` : game.wave ? `第 ${game.wave} 波 / 共 3 波` : `准备时间 · ${Math.max(0, Math.ceil(LEVELS[game.level].times[0] - game.time))} 秒`, 44, 59, 12, '#69805a');
     rounded(c, 813, 19, 260, 51, 12, '#355a3de8');
     for (let i = 0; i < 3; i++) { flower(c, 840 + i * 35, 43, 9, game.wave > i ? '#ffd34f' : '#859763', game.wave > i ? '#916037' : '#49633e'); }
@@ -294,9 +294,12 @@
     const cell = usingKeyboard ? keyboardCell : hover;
     if (cell && game.state === 'playing') {
       const p = center(cell.row, cell.col);
-      rounded(ctx, p.x - B.w / 2 + 2, p.y - B.h / 2 + 2, B.w - 4, B.h - 4, 8, selected === 'shovel' ? '#ffeab542' : '#fff9c52d', '#fff4a5', 2);
-      const preview = drag ? drag.index : selected;
-    if (typeof preview === 'number' && !game.plants.some(v => v.row === cell.row && v.col === cell.col)) { ctx.globalAlpha = 0.42; drawPlant(ctx, PLANTS[preview].id, p.x, p.y, 1, 0); ctx.globalAlpha = 1; }
+      rounded(ctx, p.x - B.w / 2 + 2, p.y - B.h / 2 + 2, B.w - 4, B.h - 4, 8, selected === 'shovel' || selectedBelt != null ? '#ffeab542' : '#fff9c52d', '#fff4a5', 2);
+      let preview = null;
+      if (drag) preview = drag.belt ? drag.belt.kind : PLANTS[drag.index].id;
+      else if (typeof selected === 'number') preview = PLANTS[selected].id;
+      else if (selectedBelt != null) { const it = game.belt.find(v => v.id === selectedBelt); if (it) preview = it.kind; }
+      if (preview && !game.plants.some(v => v.row === cell.row && v.col === cell.col)) { ctx.globalAlpha = 0.42; drawPlant(ctx, preview, p.x, p.y, 1, 0); ctx.globalAlpha = 1; }
     }
     if (game.state === 'menu') {
       for (let row = 0; row < 5; row++) { drawPlant(ctx, 'sun', center(row, 0).x, center(row, 0).y, 1, clock + row); drawPlant(ctx, 'seed', center(row, 1).x, center(row, 1).y, 1, clock + row); }
@@ -376,7 +379,7 @@
       const p = toField(event); hover = game.cell(p.x, p.y); usingKeyboard = false;
     });
     const finish = event => {
-      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (!drag || drag.pointerId !== event.pointerId || drag.belt) return;
       const { index: i, moved, ghost } = drag; drag = null;
       if (ghost) ghost.remove();
       if (!moved) return; // cards plant by dragging only — a plain click selects nothing
@@ -401,6 +404,95 @@
     $('cards').appendChild(button); return button;
   });
   let drag = null;
+  // 传送带（无尽·肉鸽）：随机植物卡从右端滑入，逐格左移，最多 7 张；最左边的滑出传送带消失。
+  const beltBox = $('belt');
+  const cardsBox = $('cards');
+  const beltEls = new Map();
+  function beltSync() {
+    if (!game.conveyor) {
+      beltBox.hidden = true;
+      for (const [, el] of beltEls) el.remove();
+      beltEls.clear();
+      return;
+    }
+    beltBox.hidden = false;
+    const slots = LEVELS[game.level].beltSlots || 7;
+    const w = beltBox.clientWidth || 600, cardW = 74;
+    const spacing = (w - cardW) / Math.max(1, slots - 1);
+    game.belt.forEach((item, i) => {
+      let el = beltEls.get(item.id);
+      if (!el) {
+        el = document.createElement('button'); el.className = 'plant-card belt-card';
+        const spec = PLANTS.find(s => s.id === item.kind);
+        el.title = `${spec.name} · ${spec.description}`;
+        el.setAttribute('aria-label', `${spec.name}，免费，${spec.description}`);
+        el.innerHTML = `<canvas width="130" height="116" aria-hidden="true"></canvas><b>${spec.name}</b><small>免费</small>`;
+        drawPlant(el.querySelector('canvas').getContext('2d'), item.kind, 65, 83, 1.2);
+        el.addEventListener('pointerdown', event => {
+          if (event.button !== 0 || game.state !== 'playing' || modal) return;
+          drag = { belt: item, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, ghost: null, moved: false };
+          try { el.setPointerCapture(event.pointerId); } catch (_) { /* capture is a convenience, not a requirement */ }
+        });
+        el.addEventListener('pointermove', event => {
+          if (!drag || drag.pointerId !== event.pointerId || !drag.belt) return;
+          if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+          drag.moved = true;
+          if (!drag.ghost) {
+            drag.ghost = document.createElement('div'); drag.ghost.className = 'drag-ghost';
+            const face = document.createElement('canvas'); face.width = 130; face.height = 116; drag.ghost.appendChild(face);
+            drawPlant(face.getContext('2d'), drag.belt.kind, 65, 83, 1.2);
+            document.body.appendChild(drag.ghost);
+          }
+          drag.ghost.style.left = `${event.clientX}px`; drag.ghost.style.top = `${event.clientY}px`;
+          const p = toField(event); hover = game.cell(p.x, p.y); usingKeyboard = false;
+        });
+        const beltFinish = event => {
+          if (!drag || drag.pointerId !== event.pointerId || !drag.belt) return;
+          const held = drag.belt, ghost = drag.ghost, moved = drag.moved;
+          drag = null;
+          if (ghost) ghost.remove();
+          if (!moved) { // 点一下选中，再去草坪点格子种植
+            selectedBelt = selectedBelt === held.id ? null : held.id; selected = null;
+            const spec2 = PLANTS.find(s => s.id === held.kind);
+            message(selectedBelt == null ? '已取消选择。' : `${spec2.name}：${spec2.description}。点击草坪格子种下。`);
+            updateUI(); return;
+          }
+          const cell = game.cell(toField(event).x, toField(event).y);
+          if (cell) {
+            const spec2 = PLANTS.find(s => s.id === held.kind);
+            const dest = game.plants.find(v => v.row === cell.row && v.col === cell.col);
+            if (dest && dest.level < 3) {
+              const error = game.fuseBelt(held.id, cell.row, cell.col);
+              if (error) message(error);
+              else { const fused = game.plants.find(v => v.row === cell.row && v.col === cell.col); message(`${spec2.name}与${PLANTS.find(s => s.id === dest.kind).name}合体，进化到 ${fused.level} 级！`); }
+            } else {
+              const error = game.plantBelt(held.id, cell.row, cell.col);
+              if (error) message(error); else { selectedBelt = null; message(`${spec2.name}已种下。`); }
+            }
+          } else message('要种在草坪格子里哦。');
+          updateUI();
+        };
+        el.addEventListener('pointerup', beltFinish);
+        el.addEventListener('pointercancel', event => { if (drag && drag.pointerId === event.pointerId && drag.belt) { if (drag.ghost) drag.ghost.remove(); drag = null; } });
+        // 新卡先落在右端、不播动画，下一拍再滑向自己的卡槽。
+        el.style.transition = 'none';
+        el.style.left = `${w - cardW}px`;
+        beltBox.appendChild(el); beltEls.set(item.id, el);
+        void el.offsetWidth; // 强制回流，让起始位置先生效
+        el.style.transition = '';
+      }
+      // 槽位从左往右排：新卡进来时整排往左挪一格，最左边的滑出传送带。
+      el.style.left = `${i * spacing}px`;
+      el.classList.toggle('selected', selectedBelt === item.id);
+    });
+    const alive = new Set(game.belt.map(i => i.id));
+    for (const [id, el] of beltEls) if (!alive.has(id)) {
+      beltEls.delete(id);
+      el.classList.add('exit');
+      el.style.left = `${-cardW - 8}px`;
+      setTimeout(() => el.remove(), 830);
+    }
+  }
   function select(value) {
     initAudio();
     if (game.state !== 'playing') return;
@@ -412,8 +504,9 @@
   }
   let lastSun = -1;
   function updateUI() {
-    const sunShown = game.cheat ? '∞' : game.sun;
+    const sunShown = game.cheat || game.conveyor ? '∞' : game.sun;
     if (sunShown !== lastSun) { $('sun').textContent = sunShown; lastSun = sunShown; }
+    cardsBox.style.display = game.conveyor ? 'none' : ''; // 传送带模式下整栏换成滑动的随机卡
     cardButtons.forEach((button, i) => {
       button.classList.toggle('selected', selected === i); button.classList.toggle('unavailable', !game.cheat && (game.sun < PLANTS[i].cost || game.cooldowns[i] > 0));
       button.setAttribute('aria-pressed', String(selected === i));
@@ -425,6 +518,7 @@
     $('pause').disabled = game.state !== 'playing' && game.state !== 'paused';
     $('sound').textContent = `音效：${soundOn ? '开' : '关'}`;
     $('restart').disabled = game.state === 'menu';
+    beltSync();
   }
   function showModal(kind, title, body, actionText, action, secondaryText = '', secondary = null) {
     modal = kind; $('overlay').hidden = false; $('dialog-title').textContent = title; $('dialog-text').textContent = body;
@@ -436,11 +530,11 @@
   }
   function hideModal() { $('overlay').hidden = true; modal = null; canvas.focus({ preventScroll: true }); }
   function menu() {
-    game.state = 'menu'; chosenLevel = Math.min(chosenLevel, 3);
+    game.state = 'menu'; chosenLevel = Math.min(chosenLevel, LEVELS.length - 1);
     $('level-buttons').replaceChildren();
     LEVELS.forEach((level, i) => {
       const open = level.endless || i <= unlocked;
-      const label = !open ? `${i + 1} · 未解锁` : level.endless ? `4 · ${level.name}${bestWave ? `（最佳 第 ${bestWave} 波）` : ''}` : `${i + 1} · ${level.name}`;
+      const label = !open ? `${i + 1} · 未解锁` : level.endless ? `${i + 1} · ${level.name}${bestWave ? `（最佳 第 ${bestWave} 波）` : ''}` : `${i + 1} · ${level.name}`;
       const b = document.createElement('button'); b.className = `level-button${i === chosenLevel ? ' chosen' : ''}`;
       b.textContent = label; b.disabled = !open;
       b.addEventListener('click', () => { chosenLevel = i; menu(); }); $('level-buttons').appendChild(b);
@@ -448,9 +542,9 @@
     showModal('menu', '阳光，由我们守护。', '枯萎的向日葵变成了小僵尸，正朝小院走来。\n种下向日葵伙伴，收集阳光，守住三波来袭！', '开始守护', () => start(chosenLevel));
   }
   function start(level) {
-    initAudio(); game.reset(level); selected = null; hover = null; usingKeyboard = false;
+    initAudio(); game.reset(level); selected = null; selectedBelt = null; hover = null; usingKeyboard = false;
     banner = LEVELS[game.level].subtitle; bannerUntil = clock + 4; lastFrame = performance.now();
-    hideModal(); message('把暖阳葵卡牌拖到草坪上种植，点击太阳收集阳光。', 7); updateUI();
+    hideModal(); message(game.conveyor ? '植物顺着传送带免费滑来——拖到草坪上种下，滑出最左边就没了。' : '把暖阳葵卡牌拖到草坪上种植，点击太阳收集阳光。', 7); updateUI();
   }
   function pauseGame() {
     if (game.state !== 'playing') return;
@@ -511,7 +605,7 @@
   $('help').addEventListener('click', () => {
     if (modal === 'help') return;
     const oldState = game.state; game.pause();
-    showModal('help', '葵田生存小手册', '① 把植物卡牌拖到草坪上种下。点击太阳可获得 25 阳光。\n② 暖阳葵产阳光；瓜子射手攻击；冰露葵减速；翠玉瓜葵抛西瓜砸一片——空中飘着的气球葵尸也只有它能砸下来。\n③ 铁壳葵挡在前面；烈日葵种下后立刻蓄力爆炸。\n④ 合体进化：任意两株植物都能合体——拖一株到另一株上，或把卡牌直接拖到已种下的植物上！1级+1级=2级（相同种类进化出更强形态，不同种类合出同时拥有两种本领的混血大植物）；2级+1级=3级（本领更强，挂两颗金星）。\n⑤ 铲子一铲一除；每行小推车全场只能救援一次，之后别让僵尸到最左边！\n数字 1–5 选卡 · S 铲除 · Esc 取消 · 空格暂停\n方向键选格 + 回车种植；C 收集一个太阳。', '知道了', () => {
+    showModal('help', '葵田生存小手册', '① 把植物卡牌拖到草坪上种下。点击太阳可获得 25 阳光。\n② 暖阳葵产阳光；瓜子射手攻击；冰露葵减速；翠玉瓜葵抛西瓜砸一片——空中飘着的气球葵尸也只有它能砸下来。\n③ 铁壳葵挡在前面；烈日葵种下后立刻蓄力爆炸。\n④ 合体进化：任意两株植物都能合体——拖一株到另一株上，或把卡牌直接拖到已种下的植物上！1级+1级=2级（相同种类进化出更强形态，不同种类合出同时拥有两种本领的混血大植物）；2级+1级=3级（本领更强，挂两颗金星）。\n⑤ 铲子一铲一除；每行小推车全场只能救援一次，之后别让僵尸到最左边！\n⑥ 无尽·肉鸽：植物卡顺着传送带从右往左滑来，免费种植，还能免费合体；卡滑出最左边就没了——手快有，手慢无。\n数字 1–5 选卡 · S 铲除 · Esc 取消 · 空格暂停\n方向键选格 + 回车种植；C 收集一个太阳。', '知道了', () => {
       if (oldState === 'playing') resumeGame();
       else if (oldState === 'menu') menu();
       else if (oldState === 'paused') { game.state = 'playing'; pauseGame(); }
@@ -540,11 +634,27 @@
       const done = game.shovel(cell.row, cell.col);
       message(done ? '已铲除。铲子已放回，需要时再拿起。' : '这里没有需要铲除的植物。');
       if (done) selected = null; // one dig per pick-up
+    } else if (selectedBelt != null) {
+      // 传送带模式：选中卡后点击格子免费种植 / 点击植物免费合体
+      const item = game.belt.find(v => v.id === selectedBelt);
+      if (!item) { selectedBelt = null; message('那张卡已经滑走了。'); }
+      else {
+        const spec = PLANTS.find(s => s.id === item.kind);
+        const dest = game.plants.find(v => v.row === cell.row && v.col === cell.col);
+        if (dest && dest.level < 3) {
+          const error = game.fuseBelt(item.id, cell.row, cell.col);
+          if (error) message(error);
+          else { const fused = game.plants.find(v => v.row === cell.row && v.col === cell.col); selectedBelt = null; message(`${spec.name}与${PLANTS.find(s => s.id === dest.kind).name}合体，进化到 ${fused.level} 级！`); }
+        } else {
+          const error = game.plantBelt(item.id, cell.row, cell.col);
+          if (error) message(error); else { selectedBelt = null; message(`${spec.name}已种下。`); }
+        }
+      }
     } else if (typeof selected === 'number') {
       if (!keyboard) { message('把上方的植物卡牌拖到草坪上种植。'); return; }
       const error = game.plant(selected, cell.row, cell.col);
       if (error) message(error); else message(`${PLANTS[selected].name}已种下。`);
-    } else message('拖动植物卡牌到草坪种植；点击掉落的太阳收集阳光。');
+    } else message(game.conveyor ? '传送带的植物免费：拖到草坪种下，或点卡选中再点格子。' : '拖动植物卡牌到草坪种植；点击掉落的太阳收集阳光。');
     updateUI();
   }
   function toField(event) { const rect = canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) / rect.width * 1100, y: (event.clientY - rect.top) / rect.height * 650 }; }
@@ -570,7 +680,7 @@
     const cell = game.cell(p.x, p.y);
     const plant = cell && game.plants.find(v => v.row === cell.row && v.col === cell.col);
     // Grab a planted flower to drag it onto a twin and fuse them into the evolved form.
-    if (plant && game.state === 'playing' && !modal && selected !== 'shovel') {
+    if (plant && game.state === 'playing' && !modal && selected !== 'shovel' && selectedBelt == null) {
       plantDrag = { plant, pointerId: event.pointerId, moved: false, startX: event.clientX, startY: event.clientY, x: p.x, y: p.y };
       try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* capture is a convenience, not a requirement */ }
       return;
@@ -602,17 +712,27 @@
     if (plantDrag && plantDrag.pointerId === event.pointerId) plantDrag = null;
     game.dropSun();
   });
-  canvas.addEventListener('contextmenu', event => { event.preventDefault(); selected = null; updateUI(); });
+  canvas.addEventListener('contextmenu', event => { event.preventDefault(); selected = null; selectedBelt = null; updateUI(); });
   document.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
     if (event.key === 'Escape') {
-      if (game.state === 'playing') { selected = null; message('已取消选择。'); }
+      if (game.state === 'playing') { selected = null; selectedBelt = null; message('已取消选择。'); }
       else if (modal === 'pause') resumeGame();
       updateUI(); return;
     }
     if (event.code === 'Space' && (game.state === 'playing' || modal === 'pause')) { event.preventDefault(); togglePause(); return; }
     if (game.state !== 'playing' || modal) return;
-    if (/^[1-9]$/.test(event.key) && Number(event.key) <= PLANTS.length) { event.preventDefault(); select(Number(event.key) - 1); }
+    if (/^[1-9]$/.test(event.key)) {
+      event.preventDefault();
+      if (game.conveyor) { // 数字键选传送带上从左数第 n 张卡
+        const it = game.belt[Number(event.key) - 1];
+        if (it) {
+          selectedBelt = selectedBelt === it.id ? null : it.id; selected = null;
+          const spec = PLANTS.find(s => s.id === it.kind);
+          message(selectedBelt == null ? '已取消选择。' : `${spec.name}：${spec.description}。方向键选格，回车种植。`);
+        }
+      } else if (Number(event.key) <= PLANTS.length) select(Number(event.key) - 1);
+    }
     if (event.key.toLowerCase() === 's') { event.preventDefault(); select('shovel'); }
     if (event.key.toLowerCase() === 'c') { const sun = game.suns[0]; if (sun) interact(sun.x, sun.y); }
     if (event.key.startsWith('Arrow')) {
@@ -638,7 +758,7 @@
       if (event.type === 'won' || event.type === 'lost') showResult(event.type);
     }
     if (clock > statusUntil && game.state === 'playing') {
-      $('status').textContent = selected === 'shovel' ? '铲除模式：点击植物移除，一铲一除。' : typeof selected === 'number' ? `已选 ${PLANTS[selected].name} · 方向键选格，回车种植` : '拖动植物卡牌到草坪种植，点击太阳收集阳光。';
+      $('status').textContent = game.conveyor ? '传送带的植物免费：拖到草坪种下（或点卡选中再点格子），滑出左边就没了。' : selected === 'shovel' ? '铲除模式：点击植物移除，一铲一除。' : typeof selected === 'number' ? `已选 ${PLANTS[selected].name} · 方向键选格，回车种植` : '拖动植物卡牌到草坪种植，点击太阳收集阳光。';
     }
     updateUI(); render(); requestAnimationFrame(frame);
   }

@@ -47,6 +47,24 @@
         Object.freeze({ type: 'balloon', base: 1, perWave: 1, cap: 30, fromWave: 5 }),
         Object.freeze({ type: 'giant', base: 0, perWave: 0.8, cap: 30, fromWave: 6 })
       ])
+    }),
+    // 无尽·肉鸽：植物卡顺着传送带从右往左免费滑来（beltInterval 秒一张，随波次加快），
+    // 卡槽共 beltSlots 格，滑出最左边就消失；僵尸潮与无尽模式相同，但血量翻倍（hpMultiplier）。
+    roguelike: Object.freeze({
+      name: '无尽·肉鸽', subtitle: '传送带送来免费的伙伴，手快有，手慢无。', endless: true, conveyor: true,
+      startDelay: 15, waveGap: 20, waveSpan: 40, waveSpanPerWave: 1, waveSpanFloor: 20, minGap: 0.03,
+      hpMultiplier: 2,
+      beltInterval: 7, beltIntervalPerWave: 0.15, beltIntervalFloor: 2.5, beltSlots: 7,
+      composition: Object.freeze([
+        Object.freeze({ type: 'flag', base: 0, perWave: 1, cap: 1, fromWave: 1 }),
+        Object.freeze({ type: 'wilt', base: 8, perWave: 2, cap: 30, fromWave: 1 }),
+        Object.freeze({ type: 'runner', base: 3, perWave: 1.5, cap: 30, fromWave: 1 }),
+        Object.freeze({ type: 'pot', base: 2, perWave: 1.5, cap: 30, fromWave: 2 }),
+        Object.freeze({ type: 'bucket', base: 1, perWave: 1, cap: 30, fromWave: 3 }),
+        Object.freeze({ type: 'bruiser', base: 1, perWave: 1, cap: 30, fromWave: 4 }),
+        Object.freeze({ type: 'balloon', base: 1, perWave: 1, cap: 30, fromWave: 5 }),
+        Object.freeze({ type: 'giant', base: 0, perWave: 0.8, cap: 30, fromWave: 6 })
+      ])
     })
   });
   if (typeof module !== 'undefined' && module.exports) module.exports = WAVE_CONFIG;
